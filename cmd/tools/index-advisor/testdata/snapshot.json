@@ -1,0 +1,121 @@
+{
+  "format_version": 1,
+  "collections": [
+    {
+      "db": "default",
+      "name": "idx_probe",
+      "aliases": [],
+      "enable_dynamic_field": true,
+      "fields": [
+        {
+          "name": "id",
+          "data_type": "INT64",
+          "is_primary_key": true
+        },
+        {
+          "name": "vec",
+          "data_type": "FLOAT_VECTOR"
+        },
+        {
+          "name": "meta",
+          "data_type": "JSON"
+        },
+        {
+          "name": "price",
+          "data_type": "INT64"
+        },
+        {
+          "name": "name",
+          "data_type": "VARCHAR"
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "meta_brand",
+          "field_name": "meta",
+          "index_type": "INVERTED",
+          "params": {
+            "json_path": "meta[\"brand\"]",
+            "json_cast_type": "varchar"
+          }
+        },
+        {
+          "index_name": "dyn_color",
+          "field_name": "color",
+          "index_type": "INVERTED",
+          "params": {
+            "json_cast_type": "varchar"
+          }
+        },
+        {
+          "index_name": "price_sort",
+          "field_name": "price",
+          "index_type": "STL_SORT"
+        },
+        {
+          "index_name": "name_ngram",
+          "field_name": "name",
+          "index_type": "NGRAM"
+        }
+      ]
+    },
+    {
+      "db": "default",
+      "name": "products",
+      "aliases": [],
+      "enable_dynamic_field": true,
+      "fields": [
+        {
+          "name": "id",
+          "data_type": "INT64",
+          "is_primary_key": true
+        },
+        {
+          "name": "vec",
+          "data_type": "FLOAT_VECTOR"
+        },
+        {
+          "name": "city",
+          "data_type": "VARCHAR"
+        },
+        {
+          "name": "sku",
+          "data_type": "VARCHAR"
+        },
+        {
+          "name": "price",
+          "data_type": "INT64"
+        },
+        {
+          "name": "rating",
+          "data_type": "DOUBLE"
+        },
+        {
+          "name": "in_stock",
+          "data_type": "BOOL"
+        },
+        {
+          "name": "tags",
+          "data_type": "ARRAY",
+          "element_type": "VARCHAR"
+        },
+        {
+          "name": "meta",
+          "data_type": "JSON"
+        }
+      ],
+      "indexes": [
+        {
+          "index_name": "vec",
+          "field_name": "vec",
+          "index_type": "AUTOINDEX"
+        },
+        {
+          "index_name": "city",
+          "field_name": "city",
+          "index_type": "INVERTED"
+        }
+      ]
+    }
+  ]
+}

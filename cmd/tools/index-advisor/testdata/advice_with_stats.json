@@ -1,0 +1,952 @@
+{
+  "format_version": 1,
+  "inputs": {
+    "log_files": [
+      "access_log.txt"
+    ],
+    "records_total": 73,
+    "records_analyzed": 62,
+    "skipped": [
+      {
+        "reason": "hybrid_search_unsupported",
+        "count": 1
+      },
+      {
+        "reason": "method_out_of_scope",
+        "count": 1
+      },
+      {
+        "reason": "no_filter",
+        "count": 1
+      },
+      {
+        "reason": "not_a_filter_request",
+        "count": 7
+      },
+      {
+        "reason": "request_failed",
+        "count": 1
+      }
+    ],
+    "field_stats": {
+      "source": "test fixture: written by hand for the generated products data",
+      "collected_at": "2026-10-15T00:00:00Z",
+      "scope": "default.products, all 5000 rows"
+    }
+  },
+  "fingerprints": [
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "price < ? and price >= ?",
+      "count": 16,
+      "methods": {
+        "Query": 8,
+        "Search": 8
+      },
+      "time_cost_ms": {
+        "p50": 1.087,
+        "p95": 14.883,
+        "max": 14.883,
+        "samples": 16
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "city == ?",
+      "count": 10,
+      "methods": {
+        "/v2/vectordb/entities/search": 1,
+        "Query": 5,
+        "Search": 4
+      },
+      "time_cost_ms": {
+        "p50": 0.294,
+        "p95": 5.757,
+        "max": 5.757,
+        "samples": 10
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "city in [?]",
+      "count": 6,
+      "methods": {
+        "Query": 4,
+        "Search": 2
+      },
+      "time_cost_ms": {
+        "p50": 0.278,
+        "p95": 2.119,
+        "max": 2.119,
+        "samples": 6
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "in_stock == ? and rating > ?",
+      "count": 6,
+      "methods": {
+        "Query": 3,
+        "Search": 3
+      },
+      "time_cost_ms": {
+        "p50": 0.232,
+        "p95": 2.018,
+        "max": 2.018,
+        "samples": 6
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "array_contains(tags, ?)",
+      "count": 4,
+      "methods": {
+        "Query": 2,
+        "Search": 2
+      },
+      "time_cost_ms": {
+        "p50": 0.3,
+        "p95": 2.003,
+        "max": 2.003,
+        "samples": 4
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "meta[\"brand\"] == ?",
+      "count": 4,
+      "methods": {
+        "Query": 2,
+        "Search": 2
+      },
+      "time_cost_ms": {
+        "p50": 0.496,
+        "p95": 2.112,
+        "max": 2.112,
+        "samples": 4
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "sku like ?%",
+      "count": 4,
+      "methods": {
+        "Query": 2,
+        "Search": 2
+      },
+      "time_cost_ms": {
+        "p50": 0.231,
+        "p95": 1.915,
+        "max": 1.915,
+        "samples": 4
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "price > ?",
+      "count": 3,
+      "methods": {
+        "/v2/vectordb/entities/query": 1,
+        "Search": 2
+      },
+      "time_cost_ms": {
+        "p50": 1.735,
+        "p95": 18.469,
+        "max": 18.469,
+        "samples": 3
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "$meta[\"color\"] == ?",
+      "count": 2,
+      "methods": {
+        "Query": 1,
+        "Search": 1
+      },
+      "time_cost_ms": {
+        "p50": 0.452,
+        "p95": 1.79,
+        "max": 1.79,
+        "samples": 2
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "id in [?]",
+      "count": 2,
+      "methods": {
+        "Query": 1,
+        "Search": 1
+      },
+      "time_cost_ms": {
+        "p50": 0.241,
+        "p95": 1.812,
+        "max": 1.812,
+        "samples": 2
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "meta[\"score\"] > ?",
+      "count": 2,
+      "methods": {
+        "Query": 1,
+        "Search": 1
+      },
+      "time_cost_ms": {
+        "p50": 0.455,
+        "p95": 1.809,
+        "max": 1.809,
+        "samples": 2
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "sku like %?%",
+      "count": 2,
+      "methods": {
+        "Query": 1,
+        "Search": 1
+      },
+      "time_cost_ms": {
+        "p50": 0.26,
+        "p95": 1.748,
+        "max": 1.748,
+        "samples": 2
+      }
+    },
+    {
+      "db": "default",
+      "collection": "products",
+      "fingerprint": "price < ? and price > ?",
+      "count": 1,
+      "methods": {
+        "Query": 1
+      },
+      "time_cost_ms": {
+        "p50": 0.285,
+        "p95": 0.285,
+        "max": 0.285,
+        "samples": 1
+      }
+    }
+  ],
+  "recommendations": [
+    {
+      "rank": 1,
+      "db": "default",
+      "collection": "products",
+      "column": "price",
+      "data_type": "Int64",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 20,
+        "op_classes": {
+          "range": 20
+        },
+        "top_fingerprints": [
+          "price < ? and price >= ?",
+          "price > ?",
+          "price < ? and price > ?"
+        ],
+        "time_cost_ms": {
+          "p50": 1.63,
+          "p95": 14.883,
+          "max": 18.469,
+          "samples": 20
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "price",
+          "serves": [
+            "range"
+          ],
+          "predicates": 20,
+          "evidence": [
+            "this column is filtered by 20 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for Int64"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `price < ? and price >= ?`, `price > ?`, `price < ? and price > ?` with representative values and record p50/p95 latency without an index on price (for reference, the access log shows p50 1.630 ms, p95 14.883 ms over 20 requests).",
+        "After (baseline): on a copy with no other index on price, create index_type AUTOINDEX on field \"price\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 2,
+      "db": "default",
+      "collection": "products",
+      "column": "in_stock",
+      "data_type": "Bool",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 6,
+        "op_classes": {
+          "eq": 6
+        },
+        "top_fingerprints": [
+          "in_stock == ? and rating > ?"
+        ],
+        "time_cost_ms": {
+          "p50": 0.232,
+          "p95": 2.018,
+          "max": 2.018,
+          "samples": 6
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "in_stock",
+          "serves": [
+            "eq"
+          ],
+          "predicates": 6,
+          "evidence": [
+            "this column is filtered by 6 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds BITMAP for Bool"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 2,
+        "null_fraction": "unknown"
+      },
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `in_stock == ? and rating > ?` with representative values and record p50/p95 latency without an index on in_stock (for reference, the access log shows p50 0.232 ms, p95 2.018 ms over 6 requests).",
+        "After (baseline): on a copy with no other index on in_stock, create index_type AUTOINDEX on field \"in_stock\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 3,
+      "db": "default",
+      "collection": "products",
+      "column": "rating",
+      "data_type": "Double",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 6,
+        "op_classes": {
+          "range": 6
+        },
+        "top_fingerprints": [
+          "in_stock == ? and rating > ?"
+        ],
+        "time_cost_ms": {
+          "p50": 0.232,
+          "p95": 2.018,
+          "max": 2.018,
+          "samples": 6
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "rating",
+          "serves": [
+            "range"
+          ],
+          "predicates": 6,
+          "evidence": [
+            "this column is filtered by 6 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for Double"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `in_stock == ? and rating > ?` with representative values and record p50/p95 latency without an index on rating (for reference, the access log shows p50 0.232 ms, p95 2.018 ms over 6 requests).",
+        "After (baseline): on a copy with no other index on rating, create index_type AUTOINDEX on field \"rating\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 4,
+      "db": "default",
+      "collection": "products",
+      "column": "sku",
+      "data_type": "VarChar",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 6,
+        "op_classes": {
+          "like_infix": 2,
+          "like_prefix": 4
+        },
+        "top_fingerprints": [
+          "sku like ?%",
+          "sku like %?%"
+        ],
+        "time_cost_ms": {
+          "p50": 0.26,
+          "p95": 1.915,
+          "max": 1.915,
+          "samples": 6
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "sku",
+          "serves": [
+            "like_infix",
+            "like_prefix"
+          ],
+          "predicates": 6,
+          "evidence": [
+            "this column is filtered by 6 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for VarChar"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        },
+        {
+          "index_type": "NGRAM",
+          "role": "alternative",
+          "field_name": "sku",
+          "params": {
+            "max_gram": "3",
+            "min_gram": "2"
+          },
+          "serves": [
+            "like_infix"
+          ],
+          "predicates": 2,
+          "evidence": [
+            "infix, suffix or pattern LIKE, which NGRAM is documented for, is used by 2 requests",
+            "every fixed part of the observed LIKE filters has at least 2 characters (shortest: 3)"
+          ],
+          "source": "https://milvus.io/docs/ngram.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 4878,
+        "null_fraction": "unknown"
+      },
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `sku like ?%`, `sku like %?%` with representative values and record p50/p95 latency without an index on sku (for reference, the access log shows p50 0.260 ms, p95 1.915 ms over 6 requests).",
+        "After (baseline): on a copy with no other index on sku, create index_type AUTOINDEX on field \"sku\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "After (alternative): on a copy with no other index on sku, create index_type NGRAM on field \"sku\" with params max_gram=3, min_gram=2; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 5,
+      "db": "default",
+      "collection": "products",
+      "column": "meta[\"brand\"]",
+      "data_type": "JSON path",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 4,
+        "op_classes": {
+          "eq": 4
+        },
+        "top_fingerprints": [
+          "meta[\"brand\"] == ?"
+        ],
+        "time_cost_ms": {
+          "p50": 0.496,
+          "p95": 2.112,
+          "max": 2.112,
+          "samples": 4
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "meta",
+          "params": {
+            "json_cast_type": "VARCHAR",
+            "json_path": "meta[\"brand\"]"
+          },
+          "serves": [
+            "eq"
+          ],
+          "predicates": 4,
+          "evidence": [
+            "this column is filtered by 4 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for JSON path, or INVERTED on a cluster whose scalar index engine version is below 4"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 3,
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "Where JSON shredding is enabled (common.enabledJSONShredding and common.usingJSONShreddingForQuery), Milvus filters this path through JSON statistics on segments that have them, before it considers a JSON path index; measure with the deployment's settings."
+      ],
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `meta[\"brand\"] == ?` with representative values and record p50/p95 latency without an index on meta[\"brand\"] (for reference, the access log shows p50 0.496 ms, p95 2.112 ms over 4 requests).",
+        "After (baseline): on a copy with no other index on meta[\"brand\"], create index_type AUTOINDEX on field \"meta\" with params json_cast_type=VARCHAR, json_path=meta[\"brand\"]; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 6,
+      "db": "default",
+      "collection": "products",
+      "column": "tags",
+      "data_type": "Array<VarChar>",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 4,
+        "op_classes": {
+          "contains": 4
+        },
+        "top_fingerprints": [
+          "array_contains(tags, ?)"
+        ],
+        "time_cost_ms": {
+          "p50": 0.3,
+          "p95": 2.003,
+          "max": 2.003,
+          "samples": 4
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "tags",
+          "serves": [
+            "contains"
+          ],
+          "predicates": 4,
+          "evidence": [
+            "this column is filtered by 4 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for Array<VarChar>"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        },
+        {
+          "index_type": "BITMAP",
+          "role": "alternative",
+          "field_name": "tags",
+          "serves": [
+            "contains"
+          ],
+          "predicates": 4,
+          "evidence": [
+            "distinct_count 5 is below 500, where BITMAP is documented to be most effective",
+            "compare with AUTOINDEX: its HYBRID index already switches to a bitmap below bitmap_cardinality_limit (default 100)"
+          ],
+          "source": "https://milvus.io/docs/bitmap.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 5,
+        "null_fraction": "unknown"
+      },
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `array_contains(tags, ?)` with representative values and record p50/p95 latency without an index on tags (for reference, the access log shows p50 0.300 ms, p95 2.003 ms over 4 requests).",
+        "After (baseline): on a copy with no other index on tags, create index_type AUTOINDEX on field \"tags\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "After (alternative): on a copy with no other index on tags, create index_type BITMAP on field \"tags\"; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 7,
+      "db": "default",
+      "collection": "products",
+      "column": "$meta[\"color\"]",
+      "data_type": "JSON path",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 2,
+        "op_classes": {
+          "eq": 2
+        },
+        "top_fingerprints": [
+          "$meta[\"color\"] == ?"
+        ],
+        "time_cost_ms": {
+          "p50": 0.452,
+          "p95": 1.79,
+          "max": 1.79,
+          "samples": 2
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "color",
+          "params": {
+            "json_cast_type": "VARCHAR",
+            "json_path": "$meta[\"color\"]"
+          },
+          "serves": [
+            "eq"
+          ],
+          "predicates": 2,
+          "evidence": [
+            "this column is filtered by 2 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for JSON path, or INVERTED on a cluster whose scalar index engine version is below 4"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 2,
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "Where JSON shredding is enabled (common.enabledJSONShredding and common.usingJSONShreddingForQuery), Milvus filters this path through JSON statistics on segments that have them, before it considers a JSON path index; measure with the deployment's settings."
+      ],
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `$meta[\"color\"] == ?` with representative values and record p50/p95 latency without an index on $meta[\"color\"] (for reference, the access log shows p50 0.452 ms, p95 1.790 ms over 2 requests).",
+        "After (baseline): on a copy with no other index on $meta[\"color\"], create index_type AUTOINDEX on field \"color\" with params json_cast_type=VARCHAR, json_path=$meta[\"color\"]; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 8,
+      "db": "default",
+      "collection": "products",
+      "column": "meta[\"score\"]",
+      "data_type": "JSON path",
+      "action": "validate_candidates",
+      "observed": {
+        "predicates": 2,
+        "op_classes": {
+          "range": 2
+        },
+        "top_fingerprints": [
+          "meta[\"score\"] > ?"
+        ],
+        "time_cost_ms": {
+          "p50": 0.455,
+          "p95": 1.809,
+          "max": 1.809,
+          "samples": 2
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "meta",
+          "params": {
+            "json_cast_type": "DOUBLE",
+            "json_path": "meta[\"score\"]"
+          },
+          "serves": [
+            "range"
+          ],
+          "predicates": 2,
+          "evidence": [
+            "this column is filtered by 2 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for JSON path, or INVERTED on a cluster whose scalar index engine version is below 4"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "Where JSON shredding is enabled (common.enabledJSONShredding and common.usingJSONShreddingForQuery), Milvus filters this path through JSON statistics on segments that have them, before it considers a JSON path index; measure with the deployment's settings."
+      ],
+      "validation_plan": [
+        "Before: on a non-production copy of default.products with production-like data, replay `meta[\"score\"] > ?` with representative values and record p50/p95 latency without an index on meta[\"score\"] (for reference, the access log shows p50 0.455 ms, p95 1.809 ms over 2 requests).",
+        "After (baseline): on a copy with no other index on meta[\"score\"], create index_type AUTOINDEX on field \"meta\" with params json_cast_type=DOUBLE, json_path=meta[\"score\"]; this tool does not create it. Wait until the index is built, replay the same requests, and record p50/p95 latency, build time, memory and disk use, and insert latency.",
+        "Keep the candidate with the clearest measured improvement over Before; if none improves, keep no index."
+      ]
+    },
+    {
+      "rank": 9,
+      "db": "default",
+      "collection": "products",
+      "column": "city",
+      "data_type": "VarChar",
+      "action": "review_existing",
+      "observed": {
+        "predicates": 16,
+        "op_classes": {
+          "eq": 10,
+          "in": 6
+        },
+        "top_fingerprints": [
+          "city == ?",
+          "city in [?]"
+        ],
+        "time_cost_ms": {
+          "p50": 0.294,
+          "p95": 5.757,
+          "max": 5.757,
+          "samples": 16
+        }
+      },
+      "existing_indexes": [
+        {
+          "index_name": "city",
+          "index_type": "INVERTED"
+        }
+      ],
+      "candidates": [
+        {
+          "index_type": "AUTOINDEX",
+          "role": "baseline",
+          "field_name": "city",
+          "serves": [
+            "eq",
+            "in"
+          ],
+          "predicates": 16,
+          "evidence": [
+            "this column is filtered by 16 analyzed requests",
+            "AUTOINDEX lets Milvus pick the index type; with the default scalarAutoIndex.params.build it builds HYBRID for VarChar"
+          ],
+          "source": "https://milvus.io/docs/index-scalar-fields.md"
+        },
+        {
+          "index_type": "BITMAP",
+          "role": "alternative",
+          "field_name": "city",
+          "serves": [
+            "eq",
+            "in"
+          ],
+          "predicates": 16,
+          "evidence": [
+            "distinct_count 5 is below 500, where BITMAP is documented to be most effective",
+            "compare with AUTOINDEX: its HYBRID index already switches to a bitmap below bitmap_cardinality_limit (default 100)"
+          ],
+          "source": "https://milvus.io/docs/bitmap.md"
+        }
+      ],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": 5,
+        "null_fraction": 0
+      },
+      "validation_plan": [
+        "On non-production copies of default.products, one with the existing index and one without, replay `city == ?`, `city in [?]` with representative values and compare p50/p95 latency (for reference, the access log shows p50 0.294 ms, p95 5.757 ms over 16 requests); its presence alone does not show it is used.",
+        "On a copy whose only index on city is index_type AUTOINDEX on field \"city\", replay the same requests and record latency, build time, memory and disk use, and insert latency.",
+        "On a copy whose only index on city is index_type BITMAP on field \"city\", replay the same requests and record latency, build time, memory and disk use, and insert latency.",
+        "Compare these measurements with those of the existing index; this tool does not alter indexes."
+      ]
+    },
+    {
+      "rank": 10,
+      "db": "default",
+      "collection": "idx_probe",
+      "column": "$meta[\"color\"]",
+      "data_type": "JSON path",
+      "action": "review_existing",
+      "observed": {
+        "predicates": 0,
+        "op_classes": {},
+        "top_fingerprints": [],
+        "time_cost_ms": null
+      },
+      "existing_indexes": [
+        {
+          "index_name": "dyn_color",
+          "index_type": "INVERTED"
+        }
+      ],
+      "candidates": [],
+      "statistics": {
+        "row_count": "unknown",
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "No analyzed request filters on this column, so these logs show no use of its index."
+      ],
+      "validation_plan": [
+        "No analyzed request in these logs filters on $meta[\"color\"]. These logs may be a sample: access logs that cover the whole workload (every client and period) show whether requests filter on it."
+      ]
+    },
+    {
+      "rank": 11,
+      "db": "default",
+      "collection": "idx_probe",
+      "column": "meta[\"brand\"]",
+      "data_type": "JSON path",
+      "action": "review_existing",
+      "observed": {
+        "predicates": 0,
+        "op_classes": {},
+        "top_fingerprints": [],
+        "time_cost_ms": null
+      },
+      "existing_indexes": [
+        {
+          "index_name": "meta_brand",
+          "index_type": "INVERTED"
+        }
+      ],
+      "candidates": [],
+      "statistics": {
+        "row_count": "unknown",
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "No analyzed request filters on this column, so these logs show no use of its index."
+      ],
+      "validation_plan": [
+        "No analyzed request in these logs filters on meta[\"brand\"]. These logs may be a sample: access logs that cover the whole workload (every client and period) show whether requests filter on it."
+      ]
+    },
+    {
+      "rank": 12,
+      "db": "default",
+      "collection": "idx_probe",
+      "column": "name",
+      "data_type": "VarChar",
+      "action": "review_existing",
+      "observed": {
+        "predicates": 0,
+        "op_classes": {},
+        "top_fingerprints": [],
+        "time_cost_ms": null
+      },
+      "existing_indexes": [
+        {
+          "index_name": "name_ngram",
+          "index_type": "NGRAM"
+        }
+      ],
+      "candidates": [],
+      "statistics": {
+        "row_count": "unknown",
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "No analyzed request filters on this column, so these logs show no use of its index."
+      ],
+      "validation_plan": [
+        "No analyzed request in these logs filters on name. These logs may be a sample: access logs that cover the whole workload (every client and period) show whether requests filter on it."
+      ]
+    },
+    {
+      "rank": 13,
+      "db": "default",
+      "collection": "idx_probe",
+      "column": "price",
+      "data_type": "Int64",
+      "action": "review_existing",
+      "observed": {
+        "predicates": 0,
+        "op_classes": {},
+        "top_fingerprints": [],
+        "time_cost_ms": null
+      },
+      "existing_indexes": [
+        {
+          "index_name": "price_sort",
+          "index_type": "STL_SORT"
+        }
+      ],
+      "candidates": [],
+      "statistics": {
+        "row_count": "unknown",
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "No analyzed request filters on this column, so these logs show no use of its index."
+      ],
+      "validation_plan": [
+        "No analyzed request in these logs filters on price. These logs may be a sample: access logs that cover the whole workload (every client and period) show whether requests filter on it."
+      ]
+    },
+    {
+      "rank": 14,
+      "db": "default",
+      "collection": "products",
+      "column": "id",
+      "data_type": "Int64",
+      "action": "no_action",
+      "observed": {
+        "predicates": 2,
+        "op_classes": {
+          "in": 2
+        },
+        "top_fingerprints": [
+          "id in [?]"
+        ],
+        "time_cost_ms": {
+          "p50": 0.241,
+          "p95": 1.812,
+          "max": 1.812,
+          "samples": 2
+        }
+      },
+      "existing_indexes": [],
+      "candidates": [],
+      "statistics": {
+        "row_count": 5000,
+        "distinct_count": "unknown",
+        "null_fraction": "unknown"
+      },
+      "notes": [
+        "Primary key: Milvus serves ==, IN and range filters on it through its built-in primary-key lookup, and this tool proposes no index for it."
+      ]
+    }
+  ],
+  "notes": [
+    "Advisory only: this tool never creates, alters or drops an index.",
+    "Candidates are for validation, not changes to apply: no speedup is promised. Keep an index only if its validation plan shows a measured improvement.",
+    "AUTOINDEX is the baseline candidate wherever Milvus accepts it; a specific index type is listed only with evidence from the access log or --field-stats.",
+    "Existing indexes are listed from the snapshot; this report does not show whether any query used them.",
+    "Statistics shown as \"unknown\" were not provided with --field-stats; alternatives that need them are not evaluated.",
+    "Fingerprints replace every literal with ?; raw expressions, user names, client addresses and trace IDs are not reported."
+  ]
+}
