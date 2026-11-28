@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -1616,9 +1618,13 @@ func (h *HandlersV2) addCollectionStructField(ctx context.Context, c *gin.Contex
 	return resp, err
 }
 
-// copy from internal/proxy/task_query.go
-func matchCountRule(outputs []string) bool {
-	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
+func hasCountStar(outputs []string) bool {
+	for _, output := range outputs {
+		if isAgg, name, field := agg.MatchAggregationExpression(strings.TrimSpace(output)); isAgg && name == "count" && field == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1628,6 +1634,27 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		return nil, err
 	}
 	httpReq := anyReq.(*QueryReqV2)
+	limit := httpReq.Limit
+	explicitLimit := httpReq.RequestedLimit != nil
+	if explicitLimit {
+		limit = *httpReq.RequestedLimit
+	}
+	groupByFields := strings.Join(httpReq.GroupByFields, ",")
+	// The query task discards empty group-by entries.
+	hasGroupByFields := strings.TrimFunc(groupByFields, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) != ""
+	// Global count(*) ignores the server default. Grouped counts can paginate groups.
+	isGlobalCount := !hasGroupByFields && hasCountStar(httpReq.OutputFields)
+	hasLimit := limit > 0 && !isGlobalCount
+	switch {
+	case limit < 0:
+		err = merr.WrapErrParameterInvalidMsg("limit must be non-negative, got %d", limit)
+	case httpReq.Offset < 0:
+		err = merr.WrapErrParameterInvalidMsg("offset must be non-negative, got %d", httpReq.Offset)
+	case isGlobalCount && (httpReq.Offset > 0 || (explicitLimit && limit > 0)):
+		err = merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
+	case httpReq.Offset > 0 && !hasLimit:
+		err = merr.WrapErrParameterInvalidMsg("offset requires a positive limit")
+	}
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -1635,6 +1662,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 		QueryParams:    []*commonpb.KeyValuePair{},
+	}
+	if err != nil {
+		c.Set(ContextRequest, req)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -1663,18 +1695,14 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
-	// Keep the legacy global count(*) behavior: REST never forwards its limit
-	// for a lone count(*). GroupByFields is new, so grouped counts still forward
-	// limit and offset to paginate groups.
-	isLegacyGlobalCount := len(httpReq.GroupByFields) == 0 && matchCountRule(httpReq.OutputFields)
-	if httpReq.Limit > 0 && !isLegacyGlobalCount {
-		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
+	if hasLimit {
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(limit), 10)})
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
 	}
 	if len(httpReq.GroupByFields) > 0 {
-		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.GroupByFieldsKey, Value: strings.Join(httpReq.GroupByFields, ",")})
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.GroupByFieldsKey, Value: groupByFields})
 	}
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))

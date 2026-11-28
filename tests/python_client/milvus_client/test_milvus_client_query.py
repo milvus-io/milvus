@@ -5791,9 +5791,9 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_count_with_pagination_param(self):
         """
-        target: test count with pagination params
-        method: count with pagination params: offset, limit
-        expected: exception
+        target: verify global count(*) rejects pagination
+        method: query count(*) with zero offset, then with positive limit and offset separately and together
+        expected: zero offset returns the full count and positive pagination fails
         """
         client = self._client()
         res = self.query(
@@ -5801,28 +5801,20 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
             QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
             filter=default_search_exp,
             output_fields=["count(*)"],
-            offset=10,
+            offset=0,
         )[0]
         assert res[0]["count(*)"] == default_nb
-        self.query(
-            client,
-            QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
-            filter=default_search_exp,
-            output_fields=["count(*)"],
-            limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
-        self.query(
-            client,
-            QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
-            filter=default_search_exp,
-            output_fields=["count(*)"],
-            offset=10,
-            limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
+        for pagination in ({"limit": 10}, {"offset": 10}, {"limit": 10, "offset": 10}):
+            err, _ = self.query(
+                client,
+                QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
+                filter=default_search_exp,
+                output_fields=["count(*)"],
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: "count entities with pagination is not allowed"},
+                **pagination,
+            )
+            assert err.code == 1100
 
 
 @pytest.mark.xdist_group("TestQueryCountExpressionShared")
