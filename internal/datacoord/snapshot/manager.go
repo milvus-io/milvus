@@ -1869,7 +1869,7 @@ func (sm *Manager) getDBCollectionIDs(dbID int64) map[int64]struct{} {
 // buildRestoreInfo constructs a RestoreSnapshotInfo from a CopySegmentJob.
 // This centralizes the conversion logic to eliminate code duplication.
 func (sm *Manager) buildRestoreInfo(job copysegment.CopySegmentJob) *datapb.RestoreSnapshotInfo {
-	return &datapb.RestoreSnapshotInfo{
+	info := &datapb.RestoreSnapshotInfo{
 		JobId:        job.GetJobId(),
 		SnapshotName: job.GetSnapshotName(),
 		CollectionId: job.GetCollectionId(),
@@ -1879,7 +1879,15 @@ func (sm *Manager) buildRestoreInfo(job copysegment.CopySegmentJob) *datapb.Rest
 		Reason:       job.GetReason(),
 		TimeCost:     sm.calculateTimeCost(job),
 		StartTime:    job.GetStartTs() / 1e6, // Convert nanoseconds to milliseconds
+		External:     job.GetExternal(),
 	}
+	// An external snapshot records the ID its collection had on the cluster it
+	// came from. That ID can name an unrelated local collection, so it must
+	// not be reported as this job's source.
+	if !job.GetExternal() {
+		info.SourceCollectionId = job.GetSourceCollectionId()
+	}
+	return info
 }
 
 // convertJobState converts CopySegmentJobState to RestoreSnapshotState.
