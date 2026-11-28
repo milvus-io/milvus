@@ -19,10 +19,11 @@ percentage. With tiered eviction enabled, QueryCoord estimates demand without
 checking physical availability, because existing caches can be evicted.
 
 After an accepted request's broadcast succeeds, QueryCoord publishes its
-incremental demand through per-resource-group Prometheus counters. An external
-control plane combines these increments with QueryNode resource waterlines to
-make scaling decisions. The feature is optional and disabled by default;
-Worker QueryNode admission remains the final node-level resource guard.
+incremental demand through per-resource-group Prometheus counters. Refreshes
+publish advisory demand after DataView publication. An external control plane
+combines these increments with QueryNode resource waterlines to make scaling
+decisions. The feature is optional and disabled by default. Worker QueryNode
+admission remains the final node-level resource guard.
 
 ## Motivation
 
@@ -86,8 +87,9 @@ flowchart TD
 
 `LoadCollection` uses the collection's partitions. `LoadPartitions` combines
 the requested partitions with those already loaded. Each request supplies the
-current and expected configuration to the estimator. Refresh requests use the
-refresh path, and an unchanged configuration completes before precheck.
+current and expected configuration to the estimator. An unchanged configuration
+completes before precheck. Refresh requests estimate demand from the published
+DataView through a separate path.
 
 Replica assignment checks node counts for an initial collection load and for
 partition loads. Failure returns `ErrResourceGroupNodeNotEnough`; the
@@ -186,6 +188,34 @@ RG. Zero-demand groups are omitted.
 For example, increasing a replica's footprint from 80 MiB to 120 MiB while
 adding a second replica in the same RG requires `40 + 120 = 160 MiB`.
 
+### Refresh demand
+
+`LoadCollection(refresh=true)` and `LoadPartitions(refresh=true)` publish pending
+data and wait for serving QueryViews at the published version. With precheck
+enabled, QueryCoord estimates demand after publication and before the serving
+wait. This also covers imports that published a DataView before the refresh.
+
+QueryCoord compares the published DataView's sealed segment IDs in loaded
+partitions with each configured replica's QueryView placement. A segment still
+preparing is pending until a QueryNode reports it ready. Missing segments
+contribute one estimated footprint per pending replica to its resource group.
+The existing memory and disk estimator uses the current preload fields and
+segment and index metadata. New segment IDs from compaction can contribute demand
+while the previous version is still serving.
+
+QueryCoord serializes estimates for each collection. A successful estimate
+records the DataView version and retains the reported segment and replica pairs
+still pending in that snapshot. Later versions skip those pairs while they remain
+pending. Collection release clears the tracking state. The state is local to
+QueryCoord and can reset on restart or failover.
+
+Refresh estimates use the broker timeout and are advisory. Lookup and estimation
+failures leave the refresh's serving wait in place and allow a later refresh to
+retry the estimate. Existing QueryView loading and QueryNode admission determine
+when the data can serve. On a CDC deployment, QueryCoord measures demand from
+the local replica placement. The counters describe demand observed at refresh
+time, so an autoscaler can miss an increment outside its sampling window.
+
 ### Capacity and admission
 
 With tiered eviction enabled, QueryCoord returns the estimated demand without
@@ -275,15 +305,17 @@ QueryCoord exposes two counters, each with the single application label `rg`:
 
 | Metric | Meaning |
 |---|---|
-| `milvus_querycoord_load_demand_memory_bytes` | Cumulative accepted incremental memory demand whose load-config broadcast returned success. |
-| `milvus_querycoord_load_demand_disk_bytes` | Cumulative accepted incremental local-disk demand whose load-config broadcast returned success. |
+| `milvus_querycoord_load_demand_memory_bytes` | Cumulative estimated memory demand from accepted load configuration changes and refreshes. |
+| `milvus_querycoord_load_demand_disk_bytes` | Cumulative estimated local-disk demand from accepted load configuration changes and refreshes. |
 
-A counter increases only when precheck produces positive accepted demand and
-the broadcast succeeds. Disabled checks, unchanged configurations, zero demand,
-metadata or estimation failures, resource rejections, and failed broadcasts
-produce no increment. Fail-open requests caused by unavailable capacity metrics
-retain their estimated demand and increment counters after successful broadcast.
-Load completion and release do not decrement the counters.
+A load configuration change increments counters when precheck produces positive
+accepted demand and the broadcast succeeds. A refresh increments counters when
+publication succeeds and the estimate finds previously unreported pending demand.
+Disabled checks, unchanged configurations, zero demand, metadata or estimation
+failures, resource rejections, and failed broadcasts produce no increment.
+Fail-open requests caused by unavailable capacity metrics retain their estimated
+demand and increment counters after successful broadcast. Load completion and
+release do not decrement the counters.
 
 Default and named RG series are initialized at zero during registration and
 RG setup; RG deletion removes the corresponding series. The dashboard
@@ -296,9 +328,9 @@ to avoid acting repeatedly on the same demand or counting demand already
 reflected in usage. Overlapping rolling-window queries are not a one-time
 consumption protocol.
 
-Counters are best-effort telemetry. A process failure between broadcast,
-recording, and scraping can lose an observation; the metric is not a durable
-event log or a ledger of outstanding loads.
+Counters are best-effort telemetry. A process failure between acceptance,
+recording, and scraping can lose an observation. Counters track observed
+increments, while outstanding demand changes as QueryNodes load segments.
 
 ### Failure and response semantics
 
@@ -334,7 +366,7 @@ All four settings are refreshable:
 
 | Key under `queryCoord.autoscale` | Meaning |
 |---|---|
-| `precheckEnabled` | Enable resource precheck and accepted-demand recording. |
+| `precheckEnabled` | Enable resource precheck and demand recording for load configuration changes and advisory demand recording for refreshes. |
 | `enabled` | Allow admission using global autoscale upper bounds. |
 | `maxMemoryLimit` | Maximum global QN physical memory capacity after scaling, in GiB. |
 | `maxDiskLimit` | Maximum sum of Worker QN `LOCAL_STORAGE_SIZE` quotas after scaling, in GiB. |

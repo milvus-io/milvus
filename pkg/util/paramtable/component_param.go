@@ -4703,7 +4703,7 @@ Set to 0 to disable the penalty period.`,
 		Key:          "queryCoord.autoscale.precheckEnabled",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.",
+		Doc:          "Enable QueryCoord load resource precheck and demand counters for load configuration changes and refreshes. Refreshes and loads with tiered eviction enabled only estimate demand.",
 		Export:       true,
 	}
 	p.AutoscalePrecheckEnabled.Init(base.mgr)
